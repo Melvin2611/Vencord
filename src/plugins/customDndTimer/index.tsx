@@ -6,13 +6,13 @@
 
 import { ApplicationCommandInputType, ApplicationCommandOptionType, sendBotMessage } from "@api/Commands";
 import { definePluginSettings } from "@api/Settings";
+import { addServerListElement, removeServerListElement, ServerListRenderPosition } from "@api/ServerList";
 import ErrorBoundary from "@components/ErrorBoundary";
 import { Devs } from "@utils/constants";
 import definePlugin, { OptionType } from "@utils/types";
-import { findByCode, findComponentByCodeLazy, findStoreLazy } from "@webpack";
+import { findByCode, findStoreLazy } from "@webpack";
 import { ContextMenuApi, FluxDispatcher, Menu, React } from "@webpack/common";
 
-const Button = findComponentByCodeLazy(".GREEN,positionKeyStemOverride:");
 const StatusStore = findStoreLazy("StatusStore");
 
 let setStatus: any;
@@ -97,13 +97,14 @@ function DNDTimerIcon() {
 
 function CancelTimerMenu() {
     return (
-        <Menu.Menu navId="dnd-timer-menu" onClose={() => {}}>
+        <Menu.Menu navId="dnd-timer-menu" onClose={() => ContextMenuApi.closeContextMenu()}>
             <Menu.MenuItem
                 id="dnd-cancel"
                 label="Cancel Timer"
                 action={() => {
                     cancelTimer();
                     setStatus({ nextStatus: "online" });
+                    ContextMenuApi.closeContextMenu();
                 }}
                 color="danger"
             />
@@ -115,11 +116,14 @@ function SetTimerMenu() {
     const { defaultTime } = settings.use(["defaultTime"]);
     
     return (
-        <Menu.Menu navId="dnd-timer-menu" onClose={() => {}}>
+        <Menu.Menu navId="dnd-timer-menu" onClose={() => ContextMenuApi.closeContextMenu()}>
             <Menu.MenuItem
                 id="dnd-default"
                 label={`Until ${defaultTime} (default)`}
-                action={() => setDNDUntil(defaultTime)}
+                action={() => {
+                    setDNDUntil(defaultTime);
+                    ContextMenuApi.closeContextMenu();
+                }}
             />
             <Menu.MenuSeparator />
             <Menu.MenuItem
@@ -130,6 +134,7 @@ function SetTimerMenu() {
                     target.setMinutes(target.getMinutes() + 30);
                     const time = `${target.getHours()}:${String(target.getMinutes()).padStart(2, "0")}`;
                     setDNDUntil(time);
+                    ContextMenuApi.closeContextMenu();
                 }}
             />
             <Menu.MenuItem
@@ -140,6 +145,7 @@ function SetTimerMenu() {
                     target.setHours(target.getHours() + 2);
                     const time = `${target.getHours()}:${String(target.getMinutes()).padStart(2, "0")}`;
                     setDNDUntil(time);
+                    ContextMenuApi.closeContextMenu();
                 }}
             />
             <Menu.MenuItem
@@ -150,6 +156,7 @@ function SetTimerMenu() {
                     target.setHours(target.getHours() + 3);
                     const time = `${target.getHours()}:${String(target.getMinutes()).padStart(2, "0")}`;
                     setDNDUntil(time);
+                    ContextMenuApi.closeContextMenu();
                 }}
             />
             <Menu.MenuItem
@@ -160,19 +167,23 @@ function SetTimerMenu() {
                     target.setHours(target.getHours() + 6);
                     const time = `${target.getHours()}:${String(target.getMinutes()).padStart(2, "0")}`;
                     setDNDUntil(time);
+                    ContextMenuApi.closeContextMenu();
                 }}
             />
             <Menu.MenuSeparator />
             <Menu.MenuItem
                 id="dnd-midnight"
                 label="Until midnight"
-                action={() => setDNDUntil("23:59")}
+                action={() => {
+                    setDNDUntil("23:59");
+                    ContextMenuApi.closeContextMenu();
+                }}
             />
         </Menu.Menu>
     );
 }
 
-function DNDTimerButton(props: any) {  // Füge props hinzu
+function DNDTimerButton() {
     const [, forceUpdate] = React.useReducer(x => x + 1, 0);
 
     React.useEffect(() => {
@@ -189,29 +200,39 @@ function DNDTimerButton(props: any) {  // Füge props hinzu
     };
 
     return (
-        <Button
-            tooltipText={dndTimer ? "DND Timer Active" : "Set DND Timer"}
-            icon={DNDTimerIcon}
+        <div
+            className="vc-dnd-timer-button"
             onClick={handleClick}
-        />
+            onContextMenu={handleClick}
+            style={{
+                padding: "8px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "4px",
+                transition: "background-color 0.2s",
+                color: "white",
+            }}
+            onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = "var(--background-modifier-hover)";
+            }}
+            onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = "transparent";
+            }}
+            title={dndTimer ? "DND Timer Active - Click to cancel" : "Set DND Timer"}
+        >
+            <DNDTimerIcon />
+        </div>
     );
 }
 
 export default definePlugin({
     name: "CustomDndTimer",
-    description: "Set Do Not Disturb status until a specific time with automatic reset. For specific times use the buildin /dnd-until command. If you always use a specific time set the default time to yours. You can access the plugin with the clock icon on the user card (left from the mute and deafen buttons at the bottom left of your client.)",
+    description: "Set Do Not Disturb status until a specific time with automatic reset. Click the clock icon in the server list to set or cancel the timer. If you want there are also / commands: use /dnd-until for specific times, and /dnd-cancel to cancel the timer.",
     authors: [Devs.avokade],
+    dependencies: ["ServerListAPI"],
     settings,
-
-    patches: [
-        {
-            find: "#{intl::ACCOUNT_SPEAKING_WHILE_MUTED}",
-            replacement: {
-                match: /children:\[(?=.{0,25}?accountContainerRef)/,
-                replace: "children:[$self.DNDTimerButton(arguments[0]),"
-            }
-        }
-    ],
 
     flux: {
         STATUS_SET: onStatusChange
@@ -220,11 +241,13 @@ export default definePlugin({
     start() {
         setStatus = findByCode("updateAsync", "status");
         FluxDispatcher.subscribe("STATUS_SET", onStatusChange);
+        addServerListElement(ServerListRenderPosition.Below, this.renderDNDTimerButton);
     },
 
     stop() {
         cancelTimer();
         FluxDispatcher.unsubscribe("STATUS_SET", onStatusChange);
+        removeServerListElement(ServerListRenderPosition.Below, this.renderDNDTimerButton);
     },
 
     commands: [
@@ -256,10 +279,10 @@ export default definePlugin({
                     sendBotMessage(ctx.channel.id, { content: "DND timer cancelled" });
                 } else {
                     sendBotMessage(ctx.channel.id, { content: "No active timer" });
-                }
+                }             
             }
         }
     ],
 
-    DNDTimerButton: ErrorBoundary.wrap(DNDTimerButton, { noop: true })
+    renderDNDTimerButton: ErrorBoundary.wrap(DNDTimerButton, { noop: true })
 });
